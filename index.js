@@ -2,12 +2,16 @@ const express = require("express");
 const SellingPartnerAPI = require("amazon-sp-api");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
+
+app.get("/", (req, res) => {
+  res.send("FBA Inventory API is running ✔️");
+});
 
 app.get("/fba-inventory", async (req, res) => {
   try {
     const sp = new SellingPartnerAPI({
-      region: "eu", // India = EU
+      region: "eu", // INDIA => EU
       refresh_token: process.env.REFRESH_TOKEN,
       credentials: {
         SELLING_PARTNER_APP_CLIENT_ID: process.env.LWA_CLIENT_ID,
@@ -22,37 +26,53 @@ app.get("/fba-inventory", async (req, res) => {
       },
     });
 
-    const response = await sp.callAPI({
-      operation: "getInventorySummaries",
-      endpoint: "fbaInventory",
-      query: {
+    const marketplace = "A21TJRUUN4KGV"; // Amazon India Marketplace ID
+    let allData = [];
+    let nextToken = null;
+
+    do {
+      const params = {
         details: true,
         granularityType: "Marketplace",
-        granularityId: "A21TJRUUN4KGV",
-        marketplaceIds: ["A21TJRUUN4KGV"],
-      },
-    });
+        granularityId: marketplace,
+        marketplaceIds: [marketplace],
+      };
 
-    const items = (response.inventorySummaries || []).map((x) => ({
+      if (nextToken) params.nextToken = nextToken;
+
+      const resAPI = await sp.callAPI({
+        operation: "getInventorySummaries",
+        endpoint: "fbaInventory",
+        query: params,
+      });
+
+      allData = allData.concat(resAPI.inventorySummaries || []);
+      nextToken = resAPI.nextToken || null;
+
+    } while (nextToken);
+
+    const result = allData.map((x) => ({
       asin: x.asin,
       sku: x.sellerSku,
       fnSku: x.fnSku,
-      productName: x.productName || "",
-      condition: x.condition || "",
-      fulfillableQuantity: x.inventoryDetails?.fulfillableQuantity ?? 0,
-      totalQuantity: x.totalQuantity ?? 0,
-      reservedTotal:
-        x.inventoryDetails?.reservedQuantity?.totalReservedQuantity ?? 0,
-      lastUpdatedTime: x.lastUpdatedTime || "",
+      name: x.productName || "",
+      fulfillable: x.inventoryDetails?.fulfillableQuantity ?? 0,
+      reserved: x.inventoryDetails?.reservedQuantity?.totalReservedQuantity ?? 0,
+      totalQty: x.totalQuantity ?? 0,
+      updated: x.lastUpdatedTime,
     }));
 
-    res.json({ items });
+    res.json({
+      totalProducts: result.length,
+      data: result,
+    });
+
   } catch (err) {
-    console.error("API ERROR:", err);
-    res.status(500).json({ error: err.message || "Error fetching inventory" });
+    console.error("SP API ERROR:", err);
+    res.status(500).json({ error: err.message || "Inventory fetch error" });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`FBA Inventory API running on http://localhost:${PORT}`);
+  console.log(`API running http://localhost:${PORT}`);
 });
